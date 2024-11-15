@@ -135,7 +135,6 @@ def get_users(session_token, search_term):
             if matching_users:
                 print("\nUtilisateurs correspondants trouvés :")
                 for user in matching_users:
-                    # Afficher les informations disponibles
                     user_info = []
                     if user.get('id'):
                         user_info.append(f"ID : {user['id']}")
@@ -528,25 +527,154 @@ def create_ticket(session_token, ticket_data):
     response = requests.post(f"{URL}/Ticket", headers=headers, json=payload)
     
     if response.status_code == 201:
-        response_data = response.json()
-        ticket_id = response_data['id']
-        print("\n✅ Ticket créé avec succès !")
-        print("=" * 50)
-        print(f"🎫 ID du ticket  : {ticket_id}")
-        print(f"📌 Titre        : {ticket_data['title']}")
-        print(f"👤 Demandeur    : {get_user_name(session_token, ticket_data['requester_id'])}")
-        print(f"👨‍💻 Assigné à    : {get_user_name(session_token, ticket_data['assignee_id'])}")
-        print(f"📊 Statut       : Nouveau")
-        print("-" * 50)
-        print("🔗 Accès au ticket :")
-        print(f"{URL.replace('/apirest.php', '')}/front/ticket.form.php?id={ticket_id}")
-        print("=" * 50)
-        return ticket_id
+        ticket_id = response.json()["id"]
+        print(f"\n✅ Ticket créé avec succès ! ID : {ticket_id}")
+        
+        # Proposer de résoudre le ticket
+        resolve = input("\nVoulez-vous résoudre ce ticket maintenant ? (o/N) : ")
+        if resolve.lower() == 'o':
+            resolve_ticket(session_token, ticket_id)
+        
+        return True
     else:
         print("\n❌ Erreur lors de la création du ticket :")
         if hasattr(response, 'text'):
             print(response.text)
         return None
+
+def resolve_ticket(session_token, ticket_id):
+    """Résout un ticket en demandant la solution et propose l'approbation"""
+    headers = {
+        'Session-Token': session_token,
+        'App-Token': APP_TOKEN,
+        'Content-Type': 'application/json'
+    }
+
+    try:
+        print("\n📝 Entrez la solution pour résoudre le ticket :")
+        print("(Appuyez sur Entrée deux fois pour terminer)")
+        
+        lines = []
+        while True:
+            line = input()
+            if line:
+                lines.append(line)
+            else:
+                break
+        
+        solution = "\n".join(lines)
+        
+        if not solution.strip():
+            print("❌ Aucune solution fournie. Le ticket reste ouvert.")
+            return False
+
+        # 1. Créer le suivi avec la solution
+        followup_payload = {
+            "input": {
+                "itemtype": "Ticket",
+                "items_id": ticket_id,
+                "content": solution,
+                "is_private": 0
+            }
+        }
+        
+        followup_response = requests.post(
+            f"{URL}/ITILFollowup",
+            headers=headers,
+            json=followup_payload
+        )
+        
+        if followup_response.status_code != 201:
+            print(f"❌ Erreur lors de l'ajout de la solution : {followup_response.text}")
+            return False
+
+        # 2. Ajouter la solution
+        solution_payload = {
+            "input": {
+                "itemtype": "Ticket",
+                "items_id": ticket_id,
+                "content": solution
+            }
+        }
+        
+        solution_response = requests.post(
+            f"{URL}/ITILSolution",
+            headers=headers,
+            json=solution_payload
+        )
+        
+        if solution_response.status_code != 201:
+            print(f"❌ Erreur lors de l'ajout de la solution : {solution_response.text}")
+            return False
+
+        # 3. Mettre le ticket en résolu
+        ticket_payload = {
+            "input": {
+                "id": ticket_id,
+                "status": 5  # 5 = Résolu
+            }
+        }
+        
+        ticket_response = requests.put(
+            f"{URL}/Ticket/{ticket_id}",
+            headers=headers,
+            json=ticket_payload
+        )
+        
+        if ticket_response.status_code != 200:
+            print(f"❌ Erreur lors de la mise en résolu du ticket : {ticket_response.text}")
+            return False
+
+        print("✅ Solution ajoutée et ticket mis en résolu !")
+
+        # 4. Proposer l'approbation
+        approve = input("\nVoulez-vous approuver la solution et clore le ticket ? (o/N) : ")
+        if approve.lower() == 'o':
+            solution_id = solution_response.json()["id"]
+
+            # Approuver la solution
+            approve_payload = {
+                "input": {
+                    "id": solution_id,
+                    "status": 3  # 3 = Approuvé
+                }
+            }
+            
+            approve_response = requests.put(
+                f"{URL}/ITILSolution/{solution_id}",
+                headers=headers,
+                json=approve_payload
+            )
+            
+            if approve_response.status_code != 200:
+                print(f"❌ Erreur lors de l'approbation de la solution : {approve_response.text}")
+                return False
+
+            # Mettre le ticket en clos
+            close_payload = {
+                "input": {
+                    "id": ticket_id,
+                    "status": 6  # 6 = Clos
+                }
+            }
+            
+            close_response = requests.put(
+                f"{URL}/Ticket/{ticket_id}",
+                headers=headers,
+                json=close_payload
+            )
+            
+            if close_response.status_code != 200:
+                print(f"❌ Erreur lors de la clôture du ticket : {close_response.text}")
+                return False
+
+            print("✅ Solution approuvée et ticket clos avec succès !")
+        
+        return True
+            
+    except Exception as e:
+        print(f"❌ Erreur lors de la résolution du ticket : {str(e)}")
+        return False
 
 def close_session(session_token):
     headers = {

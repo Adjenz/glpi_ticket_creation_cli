@@ -361,16 +361,24 @@ def collect_ticket_information(session_token):
             print("⏳ Recherche des utilisateurs...")
             users = get_users(session_token, search_term)
             if users:
-                requester_id = input("\nEntrez l'ID du demandeur choisi (ou appuyez sur Entrée pour chercher à nouveau) : ")
-                if requester_id:
-                    if not requester_id.isdigit():
-                        print("❌ L'ID doit être un nombre.")
-                        continue
-                    if any(user['id'] == int(requester_id) for user in users):
-                        break
+                user_id = input("\nEntrez l'ID du demandeur choisi : ")
+                if user_id.isdigit() and any(user['id'] == int(user_id) for user in users):
+                    requester_id = int(user_id)
+                    
+                    # Récupérer et définir l'entité de l'utilisateur
+                    entity_info = get_user_entity(session_token, user_id)
+                    if entity_info:
+                        entities_id = entity_info['id']
+                        print(f"\nEntité du demandeur : {entity_info['completename']}")
                     else:
-                        print("❌ ID invalide, veuillez réessayer.")
-            print("Vous pouvez faire une nouvelle recherche.")
+                        entities_id = None
+                    break
+                else:
+                    print("ID utilisateur invalide.")
+            else:
+                retry = input("Voulez-vous effectuer une nouvelle recherche ? (O/n) : ")
+                if retry.lower() == 'n':
+                    return None
 
         # 5. Recherche et sélection du technicien
         while True:
@@ -428,6 +436,7 @@ def collect_ticket_information(session_token):
             "description_text": description_text,
             "category_id": category_id,
             "requester_id": requester_id,
+            "entities_id": entities_id,
             "assignee_id": assignee_id
         }
 
@@ -445,6 +454,47 @@ def collect_ticket_information(session_token):
         print(f"\n❌ Une erreur est survenue : {str(e)}")
         return None
 
+def get_user_entity(session_token, user_id):
+    """Récupère l'entité d'un utilisateur à partir de son ID"""
+    headers = {
+        'Session-Token': session_token,
+        'App-Token': APP_TOKEN
+    }
+    
+    try:
+        # Récupérer les profils de l'utilisateur
+        profile_response = requests.get(f"{URL}/User/{user_id}/Profile_User?expand_dropdowns=true", headers=headers)
+        
+        if profile_response.status_code == 200:
+            profiles = profile_response.json()
+            
+            if profiles:
+                # Récupérer l'entité de l'utilisateur
+                for profile in profiles:
+                    entity_link = next((link['href'] for link in profile.get('links', []) if link['rel'] == 'Entity'), None)
+                    if entity_link:
+                        # Récupérer les détails de l'entité de l'utilisateur
+                        entity_response = requests.get(entity_link, headers=headers)
+                        if entity_response.status_code == 200:
+                            entity_data = entity_response.json()
+                            # Récupérer l'entité parente (CLIENTS_SOUS_CONTRAT)
+                            parent_id = entity_data.get('entities_id')
+                            if parent_id:
+                                parent_response = requests.get(f"{URL}/Entity/{parent_id}?expand_dropdowns=true", headers=headers)
+                                if parent_response.status_code == 200:
+                                    parent_data = parent_response.json()
+                                    return {
+                                        'id': parent_id,
+                                        'name': parent_data.get('name', 'Entité inconnue'),
+                                        'completename': parent_data.get('completename', 'Entité inconnue')
+                                    }
+                            
+        print("\nAucune entité parente trouvée pour l'utilisateur.")
+        return None
+    except Exception as e:
+        print(f"\nErreur lors de la récupération de l'entité : {str(e)}")
+        return None
+
 def create_ticket(session_token, ticket_data):
     headers = {
         'Session-Token': session_token,
@@ -457,6 +507,7 @@ def create_ticket(session_token, ticket_data):
     description = ticket_data["description"]
     category_id = ticket_data["category_id"]
     requester_id = ticket_data["requester_id"]
+    entities_id = ticket_data.get("entities_id", None)
     assignee_id = ticket_data["assignee_id"]
 
     payload = {
@@ -465,6 +516,7 @@ def create_ticket(session_token, ticket_data):
             "content": description,
             "itilcategories_id": category_id,
             "_users_id_requester": [requester_id],
+            "entities_id": entities_id,
             "_users_id_assign": [assignee_id],
             "status": 1,
             "type": 1,

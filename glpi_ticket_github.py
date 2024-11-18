@@ -188,6 +188,24 @@ def get_user_name(session_token, user_id):
             return user_data.get('name', f"Utilisateur {user_id}")
     return f"Utilisateur {user_id}"  # Fallback si non trouvé
 
+def get_user_full_name(session_token, user_id):
+    """Récupère le nom complet de l'utilisateur à partir de son ID"""
+    headers = {
+        'Session-Token': session_token,
+        'App-Token': APP_TOKEN
+    }
+    
+    response = requests.get(f"{URL}/User/{user_id}", headers=headers)
+    if response.status_code == 200:
+        user_data = response.json()
+        if user_data:
+            firstname = user_data.get('firstname', '')
+            realname = user_data.get('realname', '')
+            if firstname and realname:
+                return f"{firstname} {realname}"
+            return user_data.get('name', f"Utilisateur {user_id}")
+    return f"Utilisateur {user_id}"  # Fallback si non trouvé
+
 def search_categories(categories, search_term):
     """Recherche dans les catégories selon un terme."""
     search_term = search_term.lower()
@@ -303,46 +321,6 @@ def collect_ticket_information(session_token):
             print("❌ La description ne peut pas être vide.")
             return None
 
-        # Construction de la description
-        description_text = f"""
-📞 Informations de contact :
-------------------------
-👤 Nom de l'appelant    : {caller_name}
-📱 Numéro de téléphone : {phone_number}
-📧 E-mail              : {email}
-{"🖨️ N° de série copieur : " + copier_serial if copier_serial else ""}
-
-📝 Description de l'incident :
-------------------------
-{incident_description}
-"""
-
-        description_html = f"""
-<div style='background-color: #f8f9fa; padding: 15px; border-radius: 5px;'>
-    <h4 style='color: #0056b3; margin-top: 0;'>📞 Informations de contact</h4>
-    <table style='width: 100%; border-collapse: collapse;'>
-        <tr>
-            <td style='padding: 5px; width: 180px;'><strong>👤 Nom de l'appelant :</strong></td>
-            <td style='padding: 5px;'>{caller_name}</td>
-        </tr>
-        <tr>
-            <td style='padding: 5px;'><strong>📱 Numéro de téléphone :</strong></td>
-            <td style='padding: 5px;'>{phone_number}</td>
-        </tr>
-        <tr>
-            <td style='padding: 5px;'><strong>📧 E-mail :</strong></td>
-            <td style='padding: 5px;'>{email}</td>
-        </tr>
-        {"<tr><td style='padding: 5px;'><strong>🖨️ N° de série copieur :</strong></td><td style='padding: 5px;'>" + copier_serial + "</td></tr>" if copier_serial else ""}
-    </table>
-
-    <h4 style='color: #0056b3; margin-top: 15px;'>📝 Description de l'incident</h4>
-    <div style='background-color: white; padding: 10px; border-radius: 3px; border: 1px solid #dee2e6;'>
-        {incident_description}
-    </div>
-</div>
-"""
-
         # 3. Catégorie
         print("\n⏳ Sélection de la catégorie...")
         category_id = select_category(session_token)
@@ -364,6 +342,9 @@ def collect_ticket_information(session_token):
                 if user_id.isdigit() and any(user['id'] == int(user_id) for user in users):
                     requester_id = int(user_id)
                     
+                    # Récupérer le nom complet du demandeur
+                    requester_name = get_user_full_name(session_token, user_id)
+                    
                     # Récupérer et définir l'entité de l'utilisateur
                     entity_info = get_user_entity(session_token, user_id)
                     if entity_info:
@@ -371,6 +352,59 @@ def collect_ticket_information(session_token):
                         print(f"\nEntité du demandeur : {entity_info['completename']}")
                     else:
                         entities_id = None
+
+                    # Construction de la description
+                    description_text = f"""
+📞 Informations de contact :
+------------------------
+👥 Nom du client        : {requester_name}
+👤 Nom de l'appelant    : {caller_name}
+📱 Numéro de téléphone : {phone_number}
+📧 E-mail              : {email}
+{"🖨️ N° de série copieur : " + copier_serial if copier_serial else ""}
+
+📝 Description de l'incident :
+------------------------
+{incident_description}
+"""
+
+                    description_html = f"""
+<div style='background-color: #f8f9fa; padding: 15px; border-radius: 5px;'>
+    <h4 style='color: #0056b3; margin-top: 0;'>📞 Informations de contact</h4>
+    <table style='width: 100%; border-collapse: collapse;'>
+        <tr>
+            <td style='padding: 5px; width: 180px;'><strong>👥 Nom du client :</strong></td>
+            <td style='padding: 5px;'>{requester_name}</td>
+        </tr>
+        <tr>
+            <td style='padding: 5px; width: 180px;'><strong>👤 Nom de l'appelant :</strong></td>
+            <td style='padding: 5px;'>{caller_name}</td>
+        </tr>
+        <tr>
+            <td style='padding: 5px;'><strong>📱 Numéro de téléphone :</strong></td>
+            <td style='padding: 5px;'>{phone_number}</td>
+        </tr>
+        <tr>
+            <td style='padding: 5px;'><strong>📧 E-mail :</strong></td>
+            <td style='padding: 5px;'>{email}</td>
+        </tr>
+        {"<tr><td style='padding: 5px;'><strong>🖨️ N° de série copieur :</strong></td><td style='padding: 5px;'>" + copier_serial + "</td></tr>" if copier_serial else ""}
+    </table>
+
+    <h4 style='color: #0056b3; margin-top: 15px;'>📝 Description de l'incident</h4>
+    <div style='background-color: white; padding: 10px; border-radius: 3px; border: 1px solid #dee2e6;'>
+        {incident_description}
+    </div>
+</div>
+"""
+                    # Demander la durée de l'intervention
+                    while True:
+                        duration_input = input("\n⏱️ Durée totale de l'intervention (en minutes) : ")
+                        if duration_input.isdigit() and int(duration_input) > 0:
+                            duration = int(duration_input)
+                            break
+                        print("❌ Veuillez entrer un nombre valide de minutes (supérieur à 0).")
+
                     break
                 else:
                     print("ID utilisateur invalide.")
@@ -436,7 +470,8 @@ def collect_ticket_information(session_token):
             "category_id": category_id,
             "requester_id": requester_id,
             "entities_id": entities_id,
-            "assignee_id": assignee_id
+            "assignee_id": assignee_id,
+            "actiontime": duration * 60  # Conversion en secondes pour GLPI
         }
 
         # Confirmation avant création
@@ -508,6 +543,7 @@ def create_ticket(session_token, ticket_data):
     requester_id = ticket_data["requester_id"]
     entities_id = ticket_data.get("entities_id", None)
     assignee_id = ticket_data["assignee_id"]
+    actiontime = ticket_data.get("actiontime", None)
 
     payload = {
         "input": {
@@ -520,7 +556,8 @@ def create_ticket(session_token, ticket_data):
             "status": 1,
             "type": 1,
             "urgency": 3,
-            "impact": 3
+            "impact": 3,
+            "actiontime": actiontime
         }
     }
 
